@@ -1,5 +1,6 @@
 import os
 import shutil
+import uuid
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +22,7 @@ app = FastAPI(
 
 
 # ==============================
-# CORS CONFIGURATION
+# CORS
 # ==============================
 
 app.add_middleware(
@@ -45,7 +46,7 @@ os.makedirs(RESULT_FOLDER, exist_ok=True)
 
 
 # ==============================
-# STATIC RESULT IMAGES
+# STATIC RESULTS
 # ==============================
 
 app.mount(
@@ -56,14 +57,14 @@ app.mount(
 
 
 # ==============================
-# LOAD YOLO MODEL
+# LOAD LIGHTWEIGHT YOLO MODEL
 # ==============================
 
 model = YOLO("yolov8n.pt")
 
 
 # ==============================
-# HOME API
+# HOME
 # ==============================
 
 @app.get("/")
@@ -74,22 +75,41 @@ def home():
 
 
 # ==============================
-# IMAGE UPLOAD & AI DETECTION
+# IMAGE UPLOAD & DETECTION
 # ==============================
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
 
     # ------------------------------
-    # Save Uploaded Image
+    # Create unique filename
     # ------------------------------
+
+    file_extension = os.path.splitext(file.filename)[1]
+
+    unique_id = str(uuid.uuid4())[:8]
+
+    safe_filename = f"image_{unique_id}{file_extension}"
 
     upload_path = os.path.join(
         UPLOAD_FOLDER,
-        file.filename
+        safe_filename
     )
 
+    result_filename = f"result_{unique_id}.jpg"
+
+    result_path = os.path.join(
+        RESULT_FOLDER,
+        result_filename
+    )
+
+
+    # ------------------------------
+    # Save uploaded image
+    # ------------------------------
+
     with open(upload_path, "wb") as buffer:
+
         shutil.copyfileobj(
             file.file,
             buffer
@@ -100,7 +120,13 @@ async def upload_image(file: UploadFile = File(...)):
     # Run YOLO Detection
     # ------------------------------
 
-    results = model(upload_path)
+    results = model.predict(
+        source=upload_path,
+        imgsz=320,
+        conf=0.25,
+        device="cpu",
+        verbose=False
+    )
 
 
     # ------------------------------
@@ -111,32 +137,21 @@ async def upload_image(file: UploadFile = File(...)):
 
     object_counts = {}
 
-    result_filename = "result_" + file.filename
-
 
     # ------------------------------
-    # Process Detection Results
+    # Process Results
     # ------------------------------
 
     for result in results:
 
-        # ------------------------------
-        # Save Detection Image
-        # ------------------------------
-
-        result_path = os.path.join(
-            RESULT_FOLDER,
-            result_filename
-        )
+        # Save detected image
 
         result.save(
             filename=result_path
         )
 
 
-        # ------------------------------
-        # Process Every Detected Object
-        # ------------------------------
+        # Process detected objects
 
         for box in result.boxes:
 
@@ -153,41 +168,50 @@ async def upload_image(file: UploadFile = File(...)):
             ]
 
 
-            # ------------------------------
-            # Add Detection Information
-            # ------------------------------
-
             detections.append({
-                "object": class_name,
-                "confidence": round(
-                    confidence * 100,
-                    2
-                )
+
+                "object":
+                    class_name,
+
+                "confidence":
+                    round(
+                        confidence * 100,
+                        2
+                    )
             })
 
 
-            # ------------------------------
-            # Count Objects
-            # ------------------------------
+            # Count objects
 
-            if class_name in object_counts:
-
-                object_counts[
-                    class_name
-                ] += 1
-
-            else:
-
-                object_counts[
-                    class_name
-                ] = 1
+            object_counts[class_name] = (
+                object_counts.get(
+                    class_name,
+                    0
+                ) + 1
+            )
 
 
     # ------------------------------
-    # Send Response to Frontend
+    # Delete uploaded image
+    # ------------------------------
+
+    try:
+
+        os.remove(
+            upload_path
+        )
+
+    except Exception:
+
+        pass
+
+
+    # ------------------------------
+    # Response
     # ------------------------------
 
     return JSONResponse(
+
         content={
 
             "message":
