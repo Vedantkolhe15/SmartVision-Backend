@@ -1,4 +1,5 @@
 import os
+import gc
 import shutil
 import uuid
 
@@ -57,13 +58,6 @@ app.mount(
 
 
 # ==============================
-# LOAD LIGHTWEIGHT YOLO MODEL
-# ==============================
-
-model = YOLO("yolov8n.pt")
-
-
-# ==============================
 # HOME
 # ==============================
 
@@ -75,158 +69,208 @@ def home():
 
 
 # ==============================
-# IMAGE UPLOAD & DETECTION
+# IMAGE ANALYSIS
 # ==============================
 
 @app.post("/upload-image")
 async def upload_image(file: UploadFile = File(...)):
 
-    # ------------------------------
-    # Create unique filename
-    # ------------------------------
+    model = None
+    results = None
 
-    file_extension = os.path.splitext(file.filename)[1]
+    # Unique filename
+    extension = os.path.splitext(file.filename)[1].lower()
 
-    unique_id = str(uuid.uuid4())[:8]
+    if extension not in [".jpg", ".jpeg", ".png", ".webp"]:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Only JPG, JPEG, PNG and WEBP images are allowed."
+            }
+        )
 
-    safe_filename = f"image_{unique_id}{file_extension}"
+    unique_id = uuid.uuid4().hex[:8]
+
+    original_filename = file.filename
+
+    safe_filename = f"{unique_id}{extension}"
 
     upload_path = os.path.join(
         UPLOAD_FOLDER,
         safe_filename
     )
 
-    result_filename = f"result_{unique_id}.jpg"
+    result_filename = f"result_{safe_filename}"
 
     result_path = os.path.join(
         RESULT_FOLDER,
         result_filename
     )
 
+    try:
 
-    # ------------------------------
-    # Save uploaded image
-    # ------------------------------
+        # ==============================
+        # SAVE IMAGE
+        # ==============================
 
-    with open(upload_path, "wb") as buffer:
+        with open(upload_path, "wb") as buffer:
 
-        shutil.copyfileobj(
-            file.file,
-            buffer
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+
+        # ==============================
+        # LOAD YOLO MODEL
+        # ==============================
+
+        model = YOLO("yolov8n.pt")
+
+
+        # ==============================
+        # RUN AI DETECTION
+        # ==============================
+
+        results = model.predict(
+            source=upload_path,
+            save=False,
+            verbose=False
         )
 
 
-    # ------------------------------
-    # Run YOLO Detection
-    # ------------------------------
+        # ==============================
+        # DETECTION DATA
+        # ==============================
 
-    results = model.predict(
-        source=upload_path,
-        imgsz=320,
-        conf=0.25,
-        device="cpu",
-        verbose=False
-    )
+        detections = []
+        object_counts = {}
 
 
-    # ------------------------------
-    # Detection Data
-    # ------------------------------
+        # ==============================
+        # PROCESS RESULTS
+        # ==============================
 
-    detections = []
+        for result in results:
 
-    object_counts = {}
+            # Save detection image
 
-
-    # ------------------------------
-    # Process Results
-    # ------------------------------
-
-    for result in results:
-
-        # Save detected image
-
-        result.save(
-            filename=result_path
-        )
-
-
-        # Process detected objects
-
-        for box in result.boxes:
-
-            class_id = int(
-                box.cls[0]
+            result.save(
+                filename=result_path
             )
 
-            confidence = float(
-                box.conf[0]
-            )
 
-            class_name = model.names[
-                class_id
-            ]
+            # Process detected objects
 
+            for box in result.boxes:
 
-            detections.append({
+                class_id = int(
+                    box.cls[0]
+                )
 
-                "object":
-                    class_name,
+                confidence = float(
+                    box.conf[0]
+                )
 
-                "confidence":
-                    round(
-                        confidence * 100,
-                        2
-                    )
-            })
+                class_name = model.names[
+                    class_id
+                ]
 
 
-            # Count objects
+                detections.append({
 
-            object_counts[class_name] = (
-                object_counts.get(
+                    "object":
+                        class_name,
+
+                    "confidence":
+                        round(
+                            confidence * 100,
+                            2
+                        )
+
+                })
+
+
+                # Count objects
+
+                object_counts[
+                    class_name
+                ] = object_counts.get(
                     class_name,
                     0
                 ) + 1
+
+
+        # ==============================
+        # DELETE UPLOADED IMAGE
+        # ==============================
+
+        if os.path.exists(upload_path):
+
+            os.remove(
+                upload_path
             )
 
 
-    # ------------------------------
-    # Delete uploaded image
-    # ------------------------------
+        # ==============================
+        # RESPONSE
+        # ==============================
 
-    try:
+        return JSONResponse(
 
-        os.remove(
-            upload_path
+            content={
+
+                "message":
+                    "Image analyzed successfully",
+
+                "filename":
+                    original_filename,
+
+                "detections":
+                    detections,
+
+                "object_counts":
+                    object_counts,
+
+                "result_image":
+                    "/results/" + result_filename
+
+            }
+
         )
 
-    except Exception:
 
-        pass
+    except Exception as e:
+
+        print(
+            "ERROR:",
+            str(e)
+        )
+
+        return JSONResponse(
+
+            status_code=500,
+
+            content={
+
+                "error":
+                    "Image analysis failed",
+
+                "details":
+                    str(e)
+
+            }
+
+        )
 
 
-    # ------------------------------
-    # Response
-    # ------------------------------
+    finally:
 
-    return JSONResponse(
+        # ==============================
+        # MEMORY CLEANUP
+        # ==============================
 
-        content={
+        del results
+        del model
 
-            "message":
-                "Image analyzed successfully",
-
-            "filename":
-                file.filename,
-
-            "detections":
-                detections,
-
-            "object_counts":
-                object_counts,
-
-            "result_image":
-                "/results/" + result_filename
-        }
-    )
+        gc.collect()
