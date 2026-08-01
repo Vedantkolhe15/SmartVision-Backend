@@ -1,9 +1,12 @@
+```python
 import os
 import shutil
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+
 from ultralytics import YOLO
 
 
@@ -119,9 +122,11 @@ async def upload_image(file: UploadFile = File(...)):
 
         # Save Detection Image
 
+        result_filename = "result_" + file.filename
+
         result_path = os.path.join(
             RESULT_FOLDER,
-            "result_" + file.filename
+            result_filename
         )
 
         result.save(
@@ -194,6 +199,7 @@ async def upload_image(file: UploadFile = File(...)):
                 object_counts,
 
             "result_image":
-                result_path
+                "/results/" + result_filename
         }
     )
+```
