@@ -1,4 +1,3 @@
-```python
 import os
 import shutil
 
@@ -110,8 +109,9 @@ async def upload_image(file: UploadFile = File(...)):
 
     detections = []
 
-    # Object counting
     object_counts = {}
+
+    result_filename = "result_" + file.filename
 
 
     # ------------------------------
@@ -120,9 +120,9 @@ async def upload_image(file: UploadFile = File(...)):
 
     for result in results:
 
+        # ------------------------------
         # Save Detection Image
-
-        result_filename = "result_" + file.filename
+        # ------------------------------
 
         result_path = os.path.join(
             RESULT_FOLDER,
@@ -134,7 +134,9 @@ async def upload_image(file: UploadFile = File(...)):
         )
 
 
+        # ------------------------------
         # Process Every Detected Object
+        # ------------------------------
 
         for box in result.boxes:
 
@@ -151,7 +153,9 @@ async def upload_image(file: UploadFile = File(...)):
             ]
 
 
+            # ------------------------------
             # Add Detection Information
+            # ------------------------------
 
             detections.append({
                 "object": class_name,
@@ -202,4 +206,3 @@ async def upload_image(file: UploadFile = File(...)):
                 "/results/" + result_filename
         }
     )
-```
